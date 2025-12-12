@@ -4,4 +4,6 @@ gunicorn
 opencv-python-headless
 numpy
 ultralytics
+python-multipart
+
 
