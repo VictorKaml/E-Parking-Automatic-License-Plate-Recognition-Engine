@@ -16,9 +16,9 @@ ultralytics # The YOLO framework (make sure this version supports your 'best.pt'
 # (like Render's standard tiers) that don't offer free GPU access.
 # If you ARE using a GPU, you must replace these with the correct CUDA versions.
 # Standard PyTorch (CPU only):
-torch==2.1.0+cpu # Specify a version to ensure compatibility
-torchvision==0.16.0+cpu
-torchaudio==2.1.0+cpu
+torch # Specify a version to ensure compatibility
+torchvision
+torchaudio
 easyocr
 
 # --- OCR Engine 2: PaddleOCR ---
@@ -29,3 +29,4 @@ paddleocr
 
 # --- General Utilities (Recommended) ---
 # python-multipart # Required for FastAPI to handle UploadFile (FormData)
+
