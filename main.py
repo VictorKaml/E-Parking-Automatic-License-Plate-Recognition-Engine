@@ -1,7 +1,6 @@
 import io
 import cv2
 import numpy as np
-import easyocr
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import JSONResponse
 from ultralytics import YOLO
@@ -12,16 +11,15 @@ from paddleocr import PaddleOCR
 app = FastAPI()
 
 # Load YOLO model once
-# Ensure 'best.pt' is in your root directory or provide the correct path
+# Ensure 'best.pt' is in your root directory
 model = YOLO("best.pt")
 
-# Initialize OCR Engines globally to save memory/time on requests
-# We use gpu=False for standard Render web services
-EASY_OCR_READER = easyocr.Reader(['en'], gpu=False)
-PADDLE_OCR = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False)
+# Initialize PaddleOCR globally
+# use_gpu=False is critical for Render/CPU-only environments
+PADDLE_OCR = PaddleOCR(use_angle_cls=False, lang="en", use_gpu=False, show_log=False)
 
 def clean_plate_result(text: str) -> str:
-    """Standardizes the output text from OCR engines."""
+    """Standardizes the output text from the OCR engine."""
     return (
         text.upper()
         .replace(" ", "")
@@ -62,7 +60,8 @@ async def detect(image: UploadFile = File(...)):
             cls = int(box.cls[0])
             class_name = model.names[cls].lower()
             
-            if "plate" in class_name and conf > max_conf:
+            # Check if detection is a license plate
+            if "License_Plate" in class_name and conf > max_conf:
                 max_conf = conf
                 best_box = box.xyxy[0].tolist()
 
@@ -81,37 +80,30 @@ async def detect(image: UploadFile = File(...)):
         
         cropped_plate = img_bgr[y1:y2, x1:x2]
 
-        # 5. Dual OCR Processing
-        # EasyOCR
-        easy_res = EASY_OCR_READER.readtext(cropped_plate)
-        easy_text = clean_plate_result(" ".join([res[1] for res in easy_res])) if easy_res else ""
-
-        # PaddleOCR
+        # 5. PaddleOCR Processing
+        # paddle_res structure: [ [ [box], [text, confidence] ], ... ]
         paddle_res = PADDLE_OCR.ocr(cropped_plate, cls=False)
-        paddle_text = ""
-        if paddle_res and paddle_res[0]:
-            paddle_text = clean_plate_result(" ".join([line[1][0] for line in paddle_res[0]]))
-
-        # 6. Logic Comparison
+        
         final_plate = ""
-        match_confidence = 0.0
+        ocr_confidence = 0.0
 
-        if easy_text == paddle_text and easy_text != "":
-            final_plate = easy_text
-            match_confidence = 1.0
-        else:
-            # Fallback logic: prefer the longer string or PaddleOCR
-            final_plate = paddle_text if len(paddle_text) >= len(easy_text) else easy_text
-            match_confidence = 0.5 if (easy_text or paddle_text) else 0.0
+        if paddle_res and paddle_res[0]:
+            # Extract text and internal OCR confidence
+            text_parts = []
+            conf_sum = 0
+            for line in paddle_res[0]:
+                text_parts.append(line[1][0])
+                conf_sum += line[1][1]
+            
+            raw_text = " ".join(text_parts)
+            final_plate = clean_plate_result(raw_text)
+            ocr_confidence = conf_sum / len(paddle_res[0])
 
         return {
-            "plate_text": final_plate,
-            "ocr_match_confidence": match_confidence,
-            "yolo_confidence": max_conf,
-            "details": {
-                "easyocr": easy_text,
-                "paddleocr": paddle_text
-            }
+            "plate_text": final_plate if final_plate else None,
+            "ocr_confidence": round(ocr_confidence, 4),
+            "yolo_confidence": round(max_conf, 4),
+            "message": "Detection successful" if final_plate else "No text found on plate"
         }
 
     except Exception as e:
@@ -119,4 +111,4 @@ async def detect(image: UploadFile = File(...)):
 
 @app.get("/")
 def health_check():
-    return {"status": "ALPR Engine Online"}
+    return {"status": "ALPR Engine Online (PaddleOCR)"}
